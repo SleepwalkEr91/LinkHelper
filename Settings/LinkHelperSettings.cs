@@ -103,7 +103,7 @@ public class LinkTuning
     public ToggleNode RequireSkillReady { get; set; } = new(true);
 
     [Menu("Max cast distance", "0 for no limit")]
-    public RangeNode<float> MaxCastDistance { get; set; } = new(100f, 0f, 1000f);
+    public RangeNode<float> MaxCastDistance { get; set; } = new(700f, 0f, 1000f);
 
     [Menu("Ignore other people's links", "Someone else linking the same target puts the same buff on them")]
     public ToggleNode OnlyMyLinks { get; set; } = new(true);
