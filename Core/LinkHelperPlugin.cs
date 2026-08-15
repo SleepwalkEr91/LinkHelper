@@ -38,7 +38,7 @@ public class LinkHelperPlugin : BaseSettingsPlugin<LinkHelperSettings>
         _tracker = new PlayerTracker(GameController, Settings, _linkStateEvaluator);
         _renderer = new PlayerCircleRenderer(GameController, Graphics, castGuard, Settings);
         _discoveryPanel = new PlayerDiscoveryPanel(Settings);
-        _linkCaster = new LinkCaster(GameController, castGuard, _skillReadiness, Settings, castHistory);
+        _linkCaster = new LinkCaster(GameController, castGuard, _skillReadiness, Settings, castHistory, _linkStateEvaluator);
 
         RegisterDiscoveryHotkey();
         RegisterCastHotkey();
@@ -152,7 +152,8 @@ public class LinkHelperPlugin : BaseSettingsPlugin<LinkHelperSettings>
         {
             var target = string.IsNullOrEmpty(_linkCaster.LastTargetName) ? "" : $" -> {_linkCaster.LastTargetName}";
             status += $"\nLink: {_linkCaster.LastBlockReason}{target}   |   " +
-                      $"gap: {_linkCaster.EffectiveCooldownMs} ms   |   sent: {_linkCaster.CastCount}";
+                      $"gap: {_linkCaster.EffectiveCooldownMs} ms   |   sent: {_linkCaster.CastCount}" +
+                      $"   |   unconfirmed: {_linkCaster.UnconfirmedCastCount}";
         }
 
         return status;

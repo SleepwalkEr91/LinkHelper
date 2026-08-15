@@ -87,9 +87,11 @@ public sealed class LinkStateEvaluator(
     /// has been generated this session) - so this stays defensive: a miss just returns 0, which
     /// the caller already treats as "duration unknown, fall back to plain buff-presence
     /// checking" exactly like the override being left at 0, never a wrong early re-cast. It
-    /// self-heals the next time this is read once the data is actually there.
+    /// self-heals the next time this is read once the data is actually there. Also used by
+    /// LinkCaster to confirm a cast actually landed (comparing the source buff's timer against
+    /// this value), not just for the early re-cast check above.
     /// </summary>
-    private float ResolveDurationSeconds()
+    public float ResolveDurationSeconds()
     {
         var overrideSeconds = settings.LinkTuning.LinkDurationOverrideSeconds.Value;
         if (overrideSeconds > 0) return overrideSeconds;
@@ -111,6 +113,37 @@ public sealed class LinkStateEvaluator(
             return durationMs / 1000f;
 
         return 0f;
+    }
+
+    /// <summary>
+    /// Current remaining time on your own "source" buff, for confirming that a cast we just sent
+    /// actually connected (see LinkCaster) - not for anything target-specific, since this buff
+    /// isn't tied to one target once several links are active. False means either the buff is not
+    /// currently up, its pattern is not configured, or the game is not reporting a usable timer
+    /// for it right now.
+    /// </summary>
+    public bool TryGetSourceBuffTimerSeconds(out float seconds)
+    {
+        seconds = 0f;
+
+        var patterns = PatternMatching.Split(settings.Link.SourceBuffPattern.Value).ToList();
+        if (patterns.Count == 0) return false;
+
+        var buffs = gameController.Player?.Buffs;
+        if (buffs == null) return false;
+
+        foreach (var buff in buffs)
+        {
+            var name = buff?.Name;
+            if (string.IsNullOrEmpty(name)) continue;
+            if (!patterns.Any(pattern => name.Contains(pattern, StringComparison.OrdinalIgnoreCase))) continue;
+            if (buff.Timer is not (> 0 and < 1e6f)) continue;
+
+            seconds = buff.Timer;
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>
