@@ -3,40 +3,45 @@ using System.Linq;
 using System.Numerics;
 using System.Text;
 using ImGuiNET;
-using LuminaryHelper.Casting;
-using LuminaryHelper.Minions;
-using LuminaryHelper.Settings;
+using LinkHelper.Casting;
+using LinkHelper.Players;
+using LinkHelper.Settings;
 
-namespace LuminaryHelper.Diagnostics;
+namespace LinkHelper.Diagnostics;
 
-public sealed class MinionDiscoveryPanel(LuminaryHelperSettings settings)
+public sealed class PlayerDiscoveryPanel(LinkHelperSettings settings)
 {
     private static readonly Vector4 ErrorColor = new(1f, 0.4f, 0.4f, 1f);
     private static readonly Vector4 ReadyColor = new(0.4f, 0.9f, 0.4f, 1f);
     private static readonly Vector4 MutedColor = new(0.6f, 0.6f, 0.6f, 1f);
 
-    public void Draw(IReadOnlyList<DiscoveredCandidate> candidates, IReadOnlyList<SkillRow> skills, string lastError)
+    public void Draw(
+        IReadOnlyList<DiscoveredPlayer> candidates,
+        IReadOnlyList<SkillRow> skills,
+        string lastError,
+        bool hasActiveSourceBuff)
     {
         if (!settings.Discovery.ShowWindow) return;
 
         var isOpen = true;
         ImGui.SetNextWindowSize(new Vector2(900, 500), ImGuiCond.FirstUseEver);
 
-        if (ImGui.Begin("LuminaryHelper - discovery", ref isOpen))
+        if (ImGui.Begin("LinkHelper - discovery", ref isOpen))
         {
             if (!string.IsNullOrEmpty(lastError))
                 ImGui.TextColored(ErrorColor, $"Last scan error: {lastError}");
 
-            var rows = settings.Discovery.OnlyUnmatched
-                ? candidates.Where(c => c.MatchedKind == null).ToList()
-                : candidates.ToList();
+            if (hasActiveSourceBuff)
+                ImGui.TextColored(ReadyColor, "Your source buff is active");
+            else
+                ImGui.TextColored(MutedColor, "Your source buff is not active");
 
-            ImGui.Text($"{rows.Count} entit{(rows.Count == 1 ? "y" : "ies")} considered");
+            ImGui.Text($"{candidates.Count} player{(candidates.Count == 1 ? "" : "s")} nearby");
             ImGui.SameLine();
-            if (ImGui.Button("Copy to clipboard")) ImGui.SetClipboardText(BuildReport(rows));
+            if (ImGui.Button("Copy to clipboard")) ImGui.SetClipboardText(BuildReport(candidates));
 
             ImGui.Separator();
-            DrawEntities(rows);
+            DrawPlayers(candidates);
 
             ImGui.Separator();
             DrawSkills(skills);
@@ -47,19 +52,17 @@ public sealed class MinionDiscoveryPanel(LuminaryHelperSettings settings)
         if (!isOpen) settings.Discovery.ShowWindow.Value = false;
     }
 
-    private static void DrawEntities(List<DiscoveredCandidate> rows)
+    private static void DrawPlayers(IReadOnlyList<DiscoveredPlayer> rows)
     {
         const ImGuiTableFlags flags = ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg |
                                       ImGuiTableFlags.Resizable | ImGuiTableFlags.ScrollY |
                                       ImGuiTableFlags.ScrollX;
 
-        if (!ImGui.BeginTable("candidates", 6, flags, new Vector2(0, 220))) return;
+        if (!ImGui.BeginTable("players", 4, flags, new Vector2(0, 220))) return;
 
-        ImGui.TableSetupColumn("Matched as", ImGuiTableColumnFlags.WidthFixed, 130);
-        ImGui.TableSetupColumn("Found by", ImGuiTableColumnFlags.WidthFixed, 120);
-        ImGui.TableSetupColumn("Summoning skill", ImGuiTableColumnFlags.WidthFixed, 150);
-        ImGui.TableSetupColumn("Name", ImGuiTableColumnFlags.WidthFixed, 160);
-        ImGui.TableSetupColumn("Metadata", ImGuiTableColumnFlags.WidthFixed, 320);
+        ImGui.TableSetupColumn("Name", ImGuiTableColumnFlags.WidthFixed, 200);
+        ImGui.TableSetupColumn("Distance", ImGuiTableColumnFlags.WidthFixed, 90);
+        ImGui.TableSetupColumn("Linked", ImGuiTableColumnFlags.WidthFixed, 80);
         ImGui.TableSetupColumn("Buffs (* = from you)", ImGuiTableColumnFlags.WidthStretch);
         ImGui.TableSetupScrollFreeze(0, 1);
         ImGui.TableHeadersRow();
@@ -69,22 +72,16 @@ public sealed class MinionDiscoveryPanel(LuminaryHelperSettings settings)
             ImGui.TableNextRow();
 
             ImGui.TableNextColumn();
-            if (row.MatchedKind is { } kind)
-                ImGui.TextUnformatted(kind.ToString());
+            ImGui.TextUnformatted(PlayerIdentity.KeyFor(row.Entity));
+
+            ImGui.TableNextColumn();
+            ImGui.TextUnformatted($"{row.Entity.DistancePlayer:0}");
+
+            ImGui.TableNextColumn();
+            if (row.IsLinked)
+                ImGui.TextColored(ReadyColor, "yes");
             else
-                ImGui.TextColored(MutedColor, "-");
-
-            ImGui.TableNextColumn();
-            ImGui.TextUnformatted(row.MatchSource.ToString());
-
-            ImGui.TableNextColumn();
-            ImGui.TextUnformatted(string.IsNullOrEmpty(row.SourceSkill) ? "-" : row.SourceSkill);
-
-            ImGui.TableNextColumn();
-            ImGui.TextUnformatted(row.Entity.RenderName ?? "");
-
-            ImGui.TableNextColumn();
-            ImGui.TextUnformatted(row.Entity.Metadata ?? "");
+                ImGui.TextColored(MutedColor, "no");
 
             ImGui.TableNextColumn();
             ImGui.TextUnformatted(row.Buffs);
@@ -103,7 +100,7 @@ public sealed class MinionDiscoveryPanel(LuminaryHelperSettings settings)
             return;
         }
 
-        ImGui.TextDisabled("Internal names go in the Flame Link and Recall skill name boxes.");
+        ImGui.TextDisabled("Internal names go in the \"Link internal name\" box under Link.");
 
         if (ImGui.Button("Copy skill list"))
             ImGui.SetClipboardText("InternalName\tName\tMaxCooldown\tUses\tCastTimeMs\tReady\n" +
@@ -155,18 +152,16 @@ public sealed class MinionDiscoveryPanel(LuminaryHelperSettings settings)
         ImGui.EndTable();
     }
 
-    private static string BuildReport(List<DiscoveredCandidate> rows)
+    private static string BuildReport(IReadOnlyList<DiscoveredPlayer> rows)
     {
         var report = new StringBuilder();
-        report.AppendLine("MatchedAs\tFoundBy\tSummoningSkill\tName\tMetadata\tBuffs");
+        report.AppendLine("Name\tDistance\tLinked\tBuffs");
 
         foreach (var row in rows)
             report.AppendLine(string.Join('\t',
-                row.MatchedKind?.ToString() ?? "-",
-                row.MatchSource,
-                string.IsNullOrEmpty(row.SourceSkill) ? "-" : row.SourceSkill,
-                row.Entity.RenderName ?? "",
-                row.Entity.Metadata ?? "",
+                PlayerIdentity.KeyFor(row.Entity),
+                $"{row.Entity.DistancePlayer:0}",
+                row.IsLinked ? "yes" : "no",
                 row.Buffs));
 
         return report.ToString();

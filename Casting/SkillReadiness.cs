@@ -4,9 +4,8 @@ using System.Linq;
 using ExileCore;
 using ExileCore.PoEMemory.Components;
 using ExileCore.PoEMemory.MemoryObjects;
-using LuminaryHelper.Minions;
 
-namespace LuminaryHelper.Casting;
+namespace LinkHelper.Casting;
 
 public sealed class SkillReadiness(GameController gameController)
 {
@@ -16,7 +15,7 @@ public sealed class SkillReadiness(GameController gameController)
 
         if (!gameController.Player.TryGetComponent<Actor>(out var actor) || actor == null) return false;
 
-        var patterns = MinionClassifier.SplitPatterns(patternList).ToList();
+        var patterns = PatternMatching.Split(patternList).ToList();
         if (patterns.Count == 0) return false;
 
         foreach (var skill in actor.ActorSkills ?? [])

@@ -1,11 +1,11 @@
 using System.Linq;
 using ExileCore;
 using ExileCore.PoEMemory.Components;
-using LuminaryHelper.Settings;
+using LinkHelper.Settings;
 
-namespace LuminaryHelper.Casting;
+namespace LinkHelper.Casting;
 
-public sealed class CastGuard(GameController gameController, LuminaryHelperSettings settings)
+public sealed class CastGuard(GameController gameController, LinkHelperSettings settings)
 {
     public bool CanSendInput(out string reason)
     {

@@ -2,24 +2,24 @@ using System.Collections.Generic;
 using ExileCore;
 using ExileCore.Shared.Enums;
 using ExileCore.Shared.Helpers;
-using LuminaryHelper.Casting;
-using LuminaryHelper.Minions;
-using LuminaryHelper.Settings;
+using LinkHelper.Casting;
+using LinkHelper.Players;
+using LinkHelper.Settings;
 using SharpDX;
 
-namespace LuminaryHelper.Rendering;
+namespace LinkHelper.Rendering;
 
-public sealed class MinionCircleRenderer(
+public sealed class PlayerCircleRenderer(
     GameController gameController,
     Graphics graphics,
     CastGuard castGuard,
-    LuminaryHelperSettings settings)
+    LinkHelperSettings settings)
 {
-    public void Draw(IReadOnlyList<TrackedMinion> minions)
+    public void Draw(IReadOnlyList<TrackedPlayer> players)
     {
         var display = settings.Display;
 
-        if (minions.Count == 0) return;
+        if (players.Count == 0) return;
         if (!display.DrawInTown && castGuard.IsInTownOrHideout()) return;
         if (display.HideWithPanelsOpen && castGuard.AnyPanelOpen) return;
 
@@ -28,31 +28,29 @@ public sealed class MinionCircleRenderer(
         var followTerrain = display.FollowTerrain.Value;
         var showLabels = display.ShowLabels.Value;
 
-        foreach (var minion in minions)
+        foreach (var player in players)
         {
-            var entity = minion.Entity;
+            var entity = player.Entity;
             if (entity is not { IsValid: true }) continue;
             if (maxDistance > 0 && entity.DistancePlayer > maxDistance) continue;
-
-            var kindSettings = settings.ForKind(minion.Kind);
-            if (!kindSettings.Enable) continue;
-            if (display.OnlyDrawPicked && !MinionIdentity.IsPicked(settings, entity)) continue;
+            if (display.OnlyDrawPicked && !PlayerIdentity.IsPicked(settings, entity)) continue;
 
             var groundPosition = gameController.IngameState.Data.ToWorldWithTerrainHeight(entity.GridPosNum);
-            var showAsUnlinked = settings.FlameLink.TrackLinkState && !minion.IsLinked;
-            var color = showAsUnlinked ? settings.FlameLink.UnlinkedColor.Value : kindSettings.Color.Value;
-            var radius = kindSettings.Radius.Value;
-            var thickness = kindSettings.Thickness.Value;
+            var showAsUnlinked = settings.Link.TrackLinkState && !player.IsLinked;
+            var color = showAsUnlinked ? settings.Link.UnlinkedColor.Value : display.Color.Value;
+            var radius = display.Radius.Value;
+            var thickness = display.Thickness.Value;
 
             graphics.DrawCircleInWorld(groundPosition, radius, color, thickness, segmentCount, followTerrain);
 
-            if (showAsUnlinked && settings.FlameLinkTuning.DrawInnerRingWhenUnlinked)
+            if (showAsUnlinked && settings.LinkTuning.DrawInnerRingWhenUnlinked)
                 graphics.DrawCircleInWorld(groundPosition, radius * 0.6f, color, thickness, segmentCount, followTerrain);
 
             if (!showLabels) continue;
 
             var screenPosition = gameController.IngameState.Camera.WorldToScreen(groundPosition);
-            graphics.DrawTextWithBackground(entity.RenderName, screenPosition, color, FontAlign.Center, Color.Black);
+            var label = PlayerIdentity.KeyFor(entity);
+            graphics.DrawTextWithBackground(label, screenPosition, color, FontAlign.Center, Color.Black);
         }
     }
 }

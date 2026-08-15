@@ -5,17 +5,18 @@ using System.Numerics;
 using System.Windows.Forms;
 using ExileCore;
 using ExileCore.Shared.Helpers;
-using LuminaryHelper.Casting;
-using LuminaryHelper.Minions;
-using LuminaryHelper.Settings;
+using LinkHelper.Casting;
+using LinkHelper.Players;
+using LinkHelper.Settings;
 
-namespace LuminaryHelper.Linking;
+namespace LinkHelper.Linking;
 
-public sealed class FlameLinkCaster(
+public sealed class LinkCaster(
     GameController gameController,
     CastGuard castGuard,
     SkillReadiness skillReadiness,
-    LuminaryHelperSettings settings)
+    LinkHelperSettings settings,
+    LinkCastHistory castHistory)
 {
     private enum Stage
     {
@@ -35,7 +36,7 @@ public sealed class FlameLinkCaster(
     public int CastCount { get; private set; }
     public bool IsCasting => _stage != Stage.Idle;
 
-    public void Update(IReadOnlyList<TrackedMinion> minions)
+    public void Update(IReadOnlyList<TrackedPlayer> players)
     {
         if (_stage != Stage.Idle)
         {
@@ -49,7 +50,7 @@ public sealed class FlameLinkCaster(
             return;
         }
 
-        var target = ChooseTarget(minions);
+        var target = ChooseTarget(players);
         if (target == null)
         {
             LastBlockReason = "Nothing to link";
@@ -64,10 +65,10 @@ public sealed class FlameLinkCaster(
     {
         get
         {
-            var tuning = settings.FlameLinkTuning;
+            var tuning = settings.LinkTuning;
             if (!tuning.UseSkillCastTime) return tuning.CastCooldownMs;
 
-            if (!skillReadiness.TryFind(tuning.SkillInternalName.Value, out var skill))
+            if (!skillReadiness.TryFind(settings.Link.SkillInternalName.Value, out var skill))
                 return tuning.CastCooldownMs;
 
             var castMs = (int)skill.CastTime.TotalMilliseconds;
@@ -75,27 +76,26 @@ public sealed class FlameLinkCaster(
         }
     }
 
-    private TrackedMinion ChooseTarget(IReadOnlyList<TrackedMinion> minions)
+    private TrackedPlayer ChooseTarget(IReadOnlyList<TrackedPlayer> players)
     {
-        var maxDistance = settings.FlameLinkTuning.MaxCastDistance.Value;
+        var maxDistance = settings.LinkTuning.MaxCastDistance.Value;
 
-        return minions
-            .Where(m => !m.IsLinked)
-            .Where(m => m.Entity is { IsValid: true, IsAlive: true })
-            .Where(m => settings.ForKind(m.Kind).AutoLink)
-            .Where(m => MinionIdentity.IsPicked(settings, m.Entity))
-            .Where(m => maxDistance <= 0 || m.Entity.DistancePlayer <= maxDistance)
-            .Where(m => TryGetScreenPosition(m, out _))
-            .OrderBy(m => m.Entity.DistancePlayer)
+        return players
+            .Where(p => !p.IsLinked)
+            .Where(p => p.Entity is { IsValid: true, IsAlive: true })
+            .Where(p => PlayerIdentity.IsPicked(settings, p.Entity))
+            .Where(p => maxDistance <= 0 || p.Entity.DistancePlayer <= maxDistance)
+            .Where(p => TryGetScreenPosition(p, out _))
+            .OrderBy(p => p.Entity.DistancePlayer)
             .FirstOrDefault();
     }
 
-    private void BeginCast(TrackedMinion target)
+    private void BeginCast(TrackedPlayer target)
     {
         if (!TryGetScreenPosition(target, out var screenPosition)) return;
 
         _cursorBeforeCast = Input.MousePositionNum;
-        LastTargetName = target.Entity.RenderName ?? target.Kind.ToString();
+        LastTargetName = PlayerIdentity.KeyFor(target.Entity);
 
         Input.SetCursorPos(WindowTopLeft() + screenPosition);
 
@@ -105,16 +105,17 @@ public sealed class FlameLinkCaster(
 
     private void AdvanceInFlightCast()
     {
-        var tuning = settings.FlameLinkTuning;
+        var tuning = settings.LinkTuning;
 
         switch (_stage)
         {
             case Stage.WaitingForCursor:
                 if (_sinceStageStart.ElapsedMilliseconds < tuning.CursorSettleMs) return;
 
-                InputHelper.SendInputPress(settings.FlameLink.SkillKey.Value);
+                InputHelper.SendInputPress(settings.Link.SkillKey.Value);
                 CastCount++;
                 _sinceLastCast.Restart();
+                castHistory.RecordCast(LastTargetName);
 
                 _stage = Stage.WaitingToRestoreCursor;
                 _sinceStageStart.Restart();
@@ -132,23 +133,23 @@ public sealed class FlameLinkCaster(
 
     private bool CanCast(out string reason)
     {
-        var flameLink = settings.FlameLink;
+        var link = settings.Link;
 
-        if (!flameLink.AutoCast)
+        if (!link.AutoCast)
         {
             reason = "Auto cast is off";
             return false;
         }
 
-        if (flameLink.SkillKey.Value?.Key is null or Keys.None)
+        if (link.SkillKey.Value?.Key is null or Keys.None)
         {
-            reason = "No Flame Link key set";
+            reason = "No Link key set";
             return false;
         }
 
-        if (flameLink.RequireHotkeyHeld)
+        if (link.RequireHotkeyHeld)
         {
-            if (flameLink.CastHotkey.Value?.Key is null or Keys.None)
+            if (link.CastHotkey.Value?.Key is null or Keys.None)
             {
                 reason = "No hold key set";
                 return false;
@@ -173,10 +174,10 @@ public sealed class FlameLinkCaster(
             return false;
         }
 
-        if (settings.FlameLinkTuning.RequireSkillReady &&
-            !skillReadiness.IsReady(settings.FlameLinkTuning.SkillInternalName.Value))
+        if (settings.LinkTuning.RequireSkillReady &&
+            !skillReadiness.IsReady(settings.Link.SkillInternalName.Value))
         {
-            reason = "Flame Link is not ready";
+            reason = "Link skill is not ready";
             return false;
         }
 
@@ -186,15 +187,15 @@ public sealed class FlameLinkCaster(
 
     private bool IsCastHotkeyHeld()
     {
-        var key = settings.FlameLink.CastHotkey.Value?.Key;
+        var key = settings.Link.CastHotkey.Value?.Key;
         return key is { } pressed && Input.IsKeyDown((int)pressed);
     }
 
-    private bool TryGetScreenPosition(TrackedMinion minion, out Vector2 screenPosition)
+    private bool TryGetScreenPosition(TrackedPlayer player, out Vector2 screenPosition)
     {
         screenPosition = default;
 
-        var entity = minion.Entity;
+        var entity = player.Entity;
         if (entity is not { IsValid: true }) return false;
 
         var worldPosition = gameController.IngameState.Data.ToWorldWithTerrainHeight(entity.GridPosNum);
