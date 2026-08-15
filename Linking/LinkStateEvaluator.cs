@@ -26,12 +26,18 @@ public sealed class LinkStateEvaluator(
     private float _cachedDurationSeconds;
 
     // A decay sample needs at least this much real time between readings to be precise enough -
-    // over shorter gaps, buff.Timer's own rounding dominates the ratio. Rate is clamped to a
-    // sane range purely as a safety net against a bad/noisy sample, not because faster or slower
-    // than this is expected to occur.
-    private const float MinDecaySampleSeconds = 1f;
+    // over shorter gaps, buff.Timer's own rounding dominates the ratio (seen in testing: readings
+    // over ~1s swung between roughly 0.7x and 1.3x in a completely normal area). Rate is clamped
+    // to a sane range purely as a safety net against a bad/noisy sample, not because faster or
+    // slower than this is expected to occur. Each accepted sample is blended into the running
+    // rate rather than replacing it outright, so a single noisy reading can only nudge it, not
+    // swing it - DecaySmoothingFactor is how much weight a fresh sample gets each time (higher =
+    // reacts faster to an actual change but stays noisier; lower = smoother but slower to notice
+    // entering/leaving a modified area).
+    private const float MinDecaySampleSeconds = 2.5f;
     private const float MinDecayRate = 0.1f;
     private const float MaxDecayRate = 10f;
+    private const float DecaySmoothingFactor = 0.35f;
 
     private readonly Stopwatch _sinceDecaySample = Stopwatch.StartNew();
     private float? _decaySampleBaselineSeconds;
@@ -204,8 +210,8 @@ public sealed class LinkStateEvaluator(
         var elapsedSeconds = (float)_sinceDecaySample.Elapsed.TotalSeconds;
         if (elapsedSeconds < MinDecaySampleSeconds) return;
 
-        var observedRate = (baselineSeconds - secondsNow) / elapsedSeconds;
-        _decayRate = Math.Clamp(observedRate, MinDecayRate, MaxDecayRate);
+        var observedRate = Math.Clamp((baselineSeconds - secondsNow) / elapsedSeconds, MinDecayRate, MaxDecayRate);
+        _decayRate += (observedRate - _decayRate) * DecaySmoothingFactor;
 
         _decaySampleBaselineSeconds = secondsNow;
         _sinceDecaySample.Restart();
