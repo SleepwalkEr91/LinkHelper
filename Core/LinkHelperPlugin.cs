@@ -65,6 +65,11 @@ public class LinkHelperPlugin : BaseSettingsPlugin<LinkHelperSettings>
 
         if (!ShouldRun()) return null;
 
+        // Every tick, not gated by RescanIntervalMs - the decay-rate estimate needs real,
+        // frequent samples to stay accurate, independent of how often the player list itself
+        // gets rebuilt.
+        _linkStateEvaluator.UpdateBuffDecayRate();
+
         var interval = Settings.Advanced.RescanIntervalMs.Value;
         if (interval <= 0 || _sinceLastScan.ElapsedMilliseconds >= interval)
         {
@@ -146,7 +151,8 @@ public class LinkHelperPlugin : BaseSettingsPlugin<LinkHelperSettings>
 
         var status = $"Tracking - players nearby: {_tracker.Players.Count}";
         status += $"   |   missing link: {_tracker.Players.Count(p => !p.IsLinked)}";
-        status += $"\nYour source buff: {(_linkStateEvaluator.HasActiveSourceBuff() ? "active" : "missing")}";
+        status += $"\nYour source buff: {(_linkStateEvaluator.HasActiveSourceBuff() ? "active" : "missing")}" +
+                  $"   |   buff speed: {_linkStateEvaluator.CurrentBuffDecayRate:0.00}x";
 
         if (Settings.Link.AutoCast)
         {

@@ -25,6 +25,18 @@ public sealed class LinkStateEvaluator(
     private readonly Stopwatch _sinceDurationRead = Stopwatch.StartNew();
     private float _cachedDurationSeconds;
 
+    // A decay sample needs at least this much real time between readings to be precise enough -
+    // over shorter gaps, buff.Timer's own rounding dominates the ratio. Rate is clamped to a
+    // sane range purely as a safety net against a bad/noisy sample, not because faster or slower
+    // than this is expected to occur.
+    private const float MinDecaySampleSeconds = 1f;
+    private const float MinDecayRate = 0.1f;
+    private const float MaxDecayRate = 10f;
+
+    private readonly Stopwatch _sinceDecaySample = Stopwatch.StartNew();
+    private float? _decaySampleBaselineSeconds;
+    private float _decayRate = 1f;
+
     public bool IsLinked(Entity player)
     {
         if (player is not { IsValid: true }) return false;
@@ -62,7 +74,9 @@ public sealed class LinkStateEvaluator(
     /// (the game doesn't report that), the link on this player should be about to run out. Only
     /// kicks in once a duration is known (override setting, or read off the skill itself) and we
     /// ourselves have cast on this exact player before - otherwise there's nothing to go on, so
-    /// it does not second-guess the plain buff-presence check above.
+    /// it does not second-guess the plain buff-presence check above. The known duration is
+    /// divided by CurrentBuffDecayRate so this still fires at the right real-time moment under
+    /// something like a map's "Buffs on Players expire X% faster" - see CurrentBuffDecayRate.
     /// </summary>
     private bool IsAboutToExpire(Entity player)
     {
@@ -72,8 +86,9 @@ public sealed class LinkStateEvaluator(
         var key = PlayerIdentity.KeyFor(player);
         if (!castHistory.TryGetSecondsSinceLastCast(key, out var secondsSinceCast)) return false;
 
+        var effectiveDurationSeconds = durationSeconds / _decayRate;
         var marginSeconds = settings.LinkTuning.RelinkMarginSeconds.Value;
-        return secondsSinceCast >= durationSeconds - marginSeconds;
+        return secondsSinceCast >= effectiveDurationSeconds - marginSeconds;
     }
 
     /// <summary>
@@ -144,6 +159,56 @@ public sealed class LinkStateEvaluator(
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// How many buff-seconds are currently ticking away per real second - 1 under normal
+    /// conditions, e.g. ~1.7 under a map's "Buffs on Players expire 70% faster". Used to correct
+    /// IsAboutToExpire's real-time-based prediction so the early re-cast still fires at roughly
+    /// the right moment even though our history tracking otherwise has no idea such a modifier
+    /// exists.
+    /// </summary>
+    public float CurrentBuffDecayRate => _decayRate;
+
+    /// <summary>
+    /// Call once per tick to keep CurrentBuffDecayRate current. We can't read map mods or
+    /// whatever else might be speeding up (or slowing down) buff expiry, and we can't read the
+    /// target's own buff timer either - but our own source buff is real and readable, and
+    /// "Buffs on Players" affects us too since we are a player. So instead of trying to identify
+    /// the cause, this just measures the effect directly: whenever the source buff's timer is
+    /// caught mid-countdown between two samples spaced at least MinDecaySampleSeconds apart, how
+    /// much it dropped versus how much real time passed IS the current speed multiplier,
+    /// whatever is causing it. A cast refreshing the buff shows up as the value going up instead
+    /// of down (or a jump onto a brand new buff) - that is not a decay sample, just a new
+    /// baseline to measure the next stretch of real decay from. Deliberately not tied to any
+    /// specific target, since this buff isn't either (see TryGetSourceBuffTimerSeconds) - it only
+    /// needs an occasional clean window without a cast in between to stay calibrated for all of
+    /// them.
+    /// </summary>
+    public void UpdateBuffDecayRate()
+    {
+        var hasNow = TryGetSourceBuffTimerSeconds(out var secondsNow);
+        if (!hasNow)
+        {
+            _decaySampleBaselineSeconds = null;
+            return;
+        }
+
+        if (_decaySampleBaselineSeconds is not { } baselineSeconds || secondsNow >= baselineSeconds)
+        {
+            _decaySampleBaselineSeconds = secondsNow;
+            _sinceDecaySample.Restart();
+            return;
+        }
+
+        var elapsedSeconds = (float)_sinceDecaySample.Elapsed.TotalSeconds;
+        if (elapsedSeconds < MinDecaySampleSeconds) return;
+
+        var observedRate = (baselineSeconds - secondsNow) / elapsedSeconds;
+        _decayRate = Math.Clamp(observedRate, MinDecayRate, MaxDecayRate);
+
+        _decaySampleBaselineSeconds = secondsNow;
+        _sinceDecaySample.Restart();
     }
 
     /// <summary>

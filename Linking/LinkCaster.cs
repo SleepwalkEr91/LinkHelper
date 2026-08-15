@@ -167,7 +167,9 @@ public sealed class LinkCaster(
     /// moments after a first successful cast, where a plain before/after jump can be too small to
     /// tell apart from noise. The tolerance accounts for the delay between the actual key press
     /// and this check (CursorRestoreDelayMs + ConfirmationDelayMs), during which a genuinely
-    /// refreshed buff has already been counting back down for a bit.
+    /// refreshed buff has already been counting back down for a bit - scaled by
+    /// CurrentBuffDecayRate, since under something like a map's "Buffs on Players expire X%
+    /// faster" that same delay eats a proportionally bigger chunk out of the timer.
     ///
     /// Only when the duration itself is not known yet (no override, and the skill's Stats
     /// dictionary hasn't reported one - see LinkStateEvaluator.ResolveDurationSeconds) does this
@@ -192,7 +194,8 @@ public sealed class LinkCaster(
         bool confirmed;
         if (durationSeconds > 0)
         {
-            var toleranceSeconds = (settings.LinkTuning.CursorRestoreDelayMs.Value + ConfirmationDelayMs) / 1000f + 0.25f;
+            var delaySeconds = (settings.LinkTuning.CursorRestoreDelayMs.Value + ConfirmationDelayMs) / 1000f;
+            var toleranceSeconds = delaySeconds * linkStateEvaluator.CurrentBuffDecayRate + 0.25f;
             confirmed = hasNow && secondsNow >= durationSeconds - toleranceSeconds;
         }
         else
