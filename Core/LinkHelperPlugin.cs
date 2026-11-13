@@ -5,7 +5,6 @@ using System.Numerics;
 using ExileCore;
 using ExileCore.PoEMemory.MemoryObjects;
 using ExileCore.Shared;
-using ImGuiNET;
 using LinkHelper.Casting;
 using LinkHelper.Diagnostics;
 using LinkHelper.Linking;
